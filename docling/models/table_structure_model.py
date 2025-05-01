@@ -13,7 +13,7 @@ from docling_core.types.doc.page import (
 from docling_ibm_models.tableformer.data_management.tf_predictor import TFPredictor
 from PIL import ImageDraw
 
-from docling.datamodel.base_models import Page, Table, TableStructurePrediction
+from docling.datamodel.base_models import Cluster, Page, Table, TableStructurePrediction
 from docling.datamodel.document import ConversionResult
 from docling.datamodel.pipeline_options import (
     AcceleratorDevice,
@@ -159,6 +159,9 @@ class TableStructureModel(BasePageModel):
                         text=f"{tc.start_row_offset_idx}, {tc.start_col_offset_idx}",
                         fill="black",
                     )
+            for cluster in table_element.unassigned:
+                x0, y0, x1, y1 = cluster.bbox.as_tuple()
+                draw.rectangle([(x0, y0), (x1, y1)], outline="yellow", width=2)
         if show:
             image.show()
         else:
@@ -219,9 +222,11 @@ class TableStructureModel(BasePageModel):
 
                     if len(table_bboxes):
                         for table_cluster, tbl_box in in_tables:
+                            assigned_ids = set()
                             # Check if word-level cells are available from backend:
                             sp = page._backend.get_segmented_page()
                             if sp is not None:
+
                                 tcells = sp.get_cells_in_bbox(
                                     cell_unit=TextCellUnit.WORD,
                                     bbox=table_cluster.bbox,
@@ -247,6 +252,7 @@ class TableStructureModel(BasePageModel):
                                             "id": new_cell.index,
                                             "text": new_cell.text,
                                             "bbox": new_cell.rect.to_bounding_box().model_dump(),
+                                            "member_ids": {c.id} | c.member_ids,
                                         }
                                     )
                             page_input["tokens"] = tokens
@@ -266,7 +272,10 @@ class TableStructureModel(BasePageModel):
                                     )
                                     element["bbox"]["token"] = text_piece
 
+                                member_ids = {i for bbox in element['text_cell_bboxes'] for i in bbox['member_ids']}
+                                assigned_ids.update(member_ids)
                                 tc = TableCell.model_validate(element)
+                                
                                 if tc.bbox is not None:
                                     tc.bbox = tc.bbox.scaled(1 / self.scale)
                                 table_cells.append(tc)
@@ -282,6 +291,27 @@ class TableStructureModel(BasePageModel):
                                 .get("rs_seq", [])
                             )
 
+                            # Unassigned cells:
+                            unassigned_groups = get_unassigned_groups(sp, table_cluster, assigned_ids.copy())
+                            unassigned_clusters = []
+                            if unassigned_groups:
+                                next_id = get_max_id(page.predictions.layout.clusters) + 1
+
+                                for group in unassigned_groups:
+                                    cluster_id = next_id
+                                    next_id += 1
+                                    cluster = Cluster(
+                                        id=cluster_id,
+                                        label=DocItemLabel.TEXT,
+                                        bbox=BoundingBox.enclosing_bbox(
+                                            [c.rect.to_bounding_box() for c in group]
+                                        ),
+                                        confidence=1.0,
+                                        cells=group,
+                                    )
+                                    page.predictions.layout.clusters.append(cluster)
+                                    unassigned_clusters.append(cluster)
+            
                             tbl = Table(
                                 otsl_seq=otsl_seq,
                                 table_cells=table_cells,
@@ -291,6 +321,7 @@ class TableStructureModel(BasePageModel):
                                 page_no=page.page_no,
                                 cluster=table_cluster,
                                 label=table_cluster.label,
+                                unassigned=unassigned_clusters,
                             )
 
                             page.predictions.tablestructure.table_map[
@@ -306,3 +337,30 @@ class TableStructureModel(BasePageModel):
                         )
 
                 yield page
+
+
+def get_max_id(clusters):
+    max_id = -1
+    for cluster in clusters:
+        max_id = max(max_id, cluster.id)
+        max_id = max(max_id, get_max_id(cluster.children))
+    return max_id
+            
+
+def get_unassigned_groups(sp, cluster, assigned_ids_mut):
+    child_groups = []
+    for child in cluster.children:
+        child_groups.extend(get_unassigned_groups(sp, child, assigned_ids_mut))
+
+    my_group = []
+    for cell in cluster.cells:
+        if cell.id in assigned_ids_mut:
+            continue
+        if cell.member_ids & assigned_ids_mut:
+            continue
+        my_group.append(cell)
+        assigned_ids_mut.add(cell.id)
+        assigned_ids_mut.update(cell.member_ids)
+    if not my_group:
+        return child_groups
+    return [my_group] + child_groups

@@ -24,7 +24,9 @@ from docling.utils.profiling import TimeRecorder
 from docling.utils.utils import download_url_with_progress
 
 _log = logging.getLogger(__name__)
+from itertools import count
 
+ID_GENERATOR = count(0)
 
 class EasyOcrModel(BaseOcrModel):
     _model_repo_folder = "EasyOcr"
@@ -156,6 +158,8 @@ class EasyOcrModel(BaseOcrModel):
                         cells = [
                             TextCell(
                                 index=ix,
+                                id=next(ID_GENERATOR),
+                                member_ids=set(),
                                 text=line[1],
                                 orig=line[1],
                                 from_ocr=True,

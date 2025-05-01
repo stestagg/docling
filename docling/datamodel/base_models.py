@@ -16,7 +16,7 @@ from docling_core.types.io import (
     DocumentStream,
 )
 from PIL.Image import Image
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from docling.backend.pdf_backend import PdfPageBackend
@@ -165,10 +165,12 @@ class ContainerElement(
 
 
 class Table(BasePageElement):
+
     otsl_seq: List[str]
     num_rows: int = 0
     num_cols: int = 0
     table_cells: List[TableCell]
+    unassigned: List[Cluster] = Field(default_factory=list)
 
 
 class TableStructurePrediction(BaseModel):
