@@ -46,9 +46,9 @@ packages = [{ include = "docling" }]
 ######################
 python = "^3.9"
 pydantic = "^2.0.0"
-docling-core = {version = "^2.26.0", extras = ["chunking"]}
-docling-ibm-models = "^3.4.0"
-docling-parse = "^4.0.0"
+docling-core = {version = "^2.26.0", extras = ["chunking"], url = "git+https://github.com/stestagg/docling-core@main"}
+docling-ibm-models = { version = "^3.4.0", url = "git+https://github.com/stestagg/docling-ibm-models@main" }
+docling-parse = {version = "^4.0.0", url = "git+https://github.com/stestagg/docling-parse@main"}
 filetype = "^1.2.0"
 pypdfium2 = "^4.30.0"
 pydantic-settings = "^2.3.0"
